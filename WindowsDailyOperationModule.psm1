@@ -41,17 +41,30 @@ else
 }
 try {
   #$CPUUsagePerfData=Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1 -ComputerName $ServerName -MaxSamples 5 
-  $PerfData=Invoke-Command -ComputerName $ServerName -ScriptBlock {Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1 -MaxSamples 5} -Credential $SACredential
-  $CpuUsage=@()
-
-  foreach ($sample in $PerfData)
+  #$PerfData=Invoke-Command -ComputerName $ServerName -ScriptBlock {Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1 -MaxSamples 5} -Credential $SACredential
+  #$CpuUsage=@()
+  
+  #get cpu usage by summary each process usage 
+  $AllProcessPerfData=@()
+  $LogicalCpuCores=(Get-WmiObject -Class win32_processor -ComputerName $ServerName -Credential $SACredential|Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+  $PerfData=Invoke-Command -ComputerName $ServerName -ScriptBlock {Get-Counter -Counter "\Process(*)\% Processor Time" -SampleInterval 1 -MaxSamples 1} -Credential $SACredential
+  
+  $datePattern = [Regex]::new('\\\\')
+  $matchPatterns = $datePattern.Matches($perfdata.readings)
+  $i=0
+  foreach($m in $matchPatterns){
+    if ($i -le ($matchPatterns.count-2))
   {
-    $ArraySample=$sample.readings.split(":")    
+      
+    $next=$matchPatterns[$i+1]
+    $Perfsampledata=$perfdata.readings.substring($m.index, ($next.Index-$m.index))
+    $i++
+    $ArraySample=$Perfsampledata.split(":")    
     $type=$ArraySample[0].trim()
-    $value=[int]$ArraySample[1].trim()
+    $value=$ArraySample[1].trim()
     $metric=switch -Wildcard ($type) 
     {
-    '*\Processor(_Total)\% Processor Time'{'cpu'}
+    '*\% Processor Time'{'cpu'}
     '*\LogicalDisk(_Total)\Disk Transfers/sec'{'diskIORequest'}
     '*\LogicalDisk(_Total)\Disk Bytes/sec'{'diskIOThrought'}
     '*\network interface(microsoft hyper-v network adapter)\Bytes Total/sec'{'NetworkThrought'}
@@ -60,7 +73,17 @@ try {
     #deserial the return object from invoke-command
 
     if ($metric -eq 'cpu'){
-      $CpuUsage+=$value
+      if(($type -notmatch "total") -and ($type -notmatch "idle")){
+        $ProcessPerfData=[PSCustomObject]@{
+          Servername = $ServerName
+          ProcessCpuUsage=$value/$LogicalCpuCores
+          Porcessname=$type
+        }
+  
+      }
+      else {
+        #skip as we dont need the informat for idle and total process.
+      }
     }
     elseif ($metric -eq 'disk') {
       
@@ -69,19 +92,22 @@ try {
       
     }
 
-
+  }
+    
+    $AllProcessPerfData+=$ProcessPerfData
+   
     
   }
 
-  $ServerBasicInfo=[PSCustomObject]@{
-    Servername = $ServerName
-    AvgCpuUsage= ($CpuUsage|Measure-Object -Average).average
-
-  }
-  $ServerBasicInfo
-
 
   #format table like  CPU /top process  
+` $Tops5Process=$AllProcessPerfData|Sort-Object -Property ProcessCpuUsage  -Descending|Select-Object -First 5
+  $TotalCpuUsage=($AllProcessPerfData|Measure-Object -Sum -Property  ProcessCpuUsage).Sum
+
+
+  $output= $Tops5Process+'Total Cpu Usage is {0}' -f $TotalCpuUsage
+  $output
+
 
 }
 catch {

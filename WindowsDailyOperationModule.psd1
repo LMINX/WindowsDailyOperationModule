@@ -13,6 +13,7 @@ Set-SrverInfo **
 3 schedule reboot the server 
 4 intergration with the Snow and Azure runbook Azure ,such as open the ticketinitial  or call runbook 
 5 decommission server
+6 active the license
 #>
 #
 # Module manifest for module 'WindowsDailyOperationModule'
